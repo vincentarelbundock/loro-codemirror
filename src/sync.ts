@@ -57,16 +57,21 @@ export class LoroSyncPluginValue implements PluginValue {
             return;
         }
         if (e.by === "import") {
-            let changes: ChangeSpec[] = [];
+            // A batch can carry events for containers other than this text --
+            // a document that holds a map of texts emits the map's event
+            // alongside the text's -- and it can carry more than one event
+            // for this text. So skip an event that is not ours instead of
+            // abandoning the rest of the batch, and dispatch once after
+            // collecting all of them: `changes` and `pos` accumulate across
+            // events, so a dispatch inside the loop applies the earlier
+            // changes a second time.
+            const changes: ChangeSpec[] = [];
             let pos = 0;
-            for (let { diff, target } of e.events) {
-                const text = this.getTextFromDoc(this.doc);
-                // Skip if the event is not a text event
-                if (diff.type !== "text") return;
-                // Skip if the event is not for the current document
-                if (target !== text.id) return;
-                const textDiff = diff.diff;
-                for (const delta of textDiff) {
+            const text = this.getTextFromDoc(this.doc);
+            for (const { diff, target } of e.events) {
+                if (diff.type !== "text") continue;
+                if (target !== text.id) continue;
+                for (const delta of diff.diff) {
                     if (delta.insert) {
                         changes.push({
                             from: pos,
@@ -83,6 +88,8 @@ export class LoroSyncPluginValue implements PluginValue {
                         pos += delta.retain;
                     }
                 }
+            }
+            if (changes.length > 0) {
                 this.view.dispatch({
                     changes,
                     annotations: [loroSyncAnnotation.of(this)],
